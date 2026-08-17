@@ -82,7 +82,8 @@ verify() {
   if [[ "${XDG_SESSION_TYPE:-}" == x11 ]] && command -v xprop >/dev/null; then
     local geom_h work
     geom_h=$(xprop -root _NET_DESKTOP_GEOMETRY | grep -oE '[0-9]+' | tail -1)
-    work=$(xprop -root _NET_WORKAREA | grep -oE '[0-9]+' | sed -n '2p;4p' | paste -sd+ | bc)
+    # _NET_WORKAREA is x,y,w,h — y + h should land on the screen bottom.
+    work=$(xprop -root _NET_WORKAREA | grep -oE '[0-9]+' | awk 'NR==2{y=$1} NR==4{print y+$1}')
     [[ "$work" == "$geom_h" ]] \
       && echo "OK dock reserves no space (workarea reaches screen bottom)" \
       || { echo "MISMATCH dock still reserves space: workarea ${work}px of ${geom_h}px"; fails=$((fails + 1)); }
@@ -97,5 +98,5 @@ case "${1:-apply}" in
   reset)  gsettings reset-recursively "$SCHEMA"; echo "reset to Ubuntu defaults" ;;
   show)   for k in $(gsettings list-keys "$SCHEMA" | sort); do
             printf '%-42s %s\n' "$k" "$(gsettings get "$SCHEMA" "$k")"; done ;;
-  *)      echo "usage: $0 [apply|verify|reset|show]" >&2; exit 2 ;;
+  *)      echo "usage: dock.sh [apply|verify|reset|show]" >&2; exit 2 ;;
 esac

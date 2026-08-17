@@ -9,23 +9,42 @@ exposes three of the knobs involved (position: left/bottom/right, icon size, aut
 The rest live in the `dash-to-dock` GSettings schema. This script sets them all in one
 shot and verifies the result.
 
+## One-shot setup
+
 ```bash
-git clone git@github.com:codebyshoaib/ubuntu-dock-setup.git
-cd ubuntu-dock-setup
-./dock.sh              # apply + verify
-./dock.sh verify       # check current state matches (exit 1 on drift)
-./dock.sh reset        # back to Ubuntu defaults
-./dock.sh show         # dump every key in the schema with its current value
+curl -fsSL https://raw.githubusercontent.com/codebyshoaib/ubuntu-dock-setup/main/dock.sh | bash
 ```
 
-Idempotent — re-run it any time. No sudo, no files touched outside dconf.
+That's the whole install. No clone, no sudo, no dependencies to add, nothing written
+outside dconf. Takes effect immediately — no logout or shell restart.
+
+Other modes, same way:
+
+```bash
+URL=https://raw.githubusercontent.com/codebyshoaib/ubuntu-dock-setup/main/dock.sh
+curl -fsSL $URL | bash -s -- verify   # check state matches (exit 1 on drift)
+curl -fsSL $URL | bash -s -- reset    # back to Ubuntu defaults
+curl -fsSL $URL | bash -s -- show     # dump every key with its current value
+```
+
+Or read it first, which you should before piping anyone's script into your shell:
+
+```bash
+git clone https://github.com/codebyshoaib/ubuntu-dock-setup.git
+cd ubuntu-dock-setup && ./dock.sh
+```
+
+Idempotent — re-run it any time.
 
 ## Requirements
 
 Ubuntu with the Ubuntu Dock extension (`ubuntu-dock@ubuntu.com`, the default on
-Ubuntu 20.04+). Works on upstream `dash-to-dock` too — same schema ID. The strut
-check in `verify` needs X11 and `xprop`; on Wayland it's skipped and the rest of
-the verification still runs.
+Ubuntu 20.04+). Works on upstream `dash-to-dock` too — same schema ID. If the schema
+isn't installed the script says so and exits 1 rather than half-applying.
+
+Binaries used: `gsettings`, `awk`, `grep`, `xprop` — all present on a stock Ubuntu
+desktop. The `xprop` strut check needs X11; on Wayland it's skipped and the remaining
+verification still runs.
 
 ## What it changes, and why
 
