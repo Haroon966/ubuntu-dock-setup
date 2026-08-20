@@ -302,7 +302,7 @@ def build_ui() -> None:
     import gi
 
     gi.require_version("Gtk", "3.0")
-    from gi.repository import Gdk, Gtk
+    from gi.repository import Gdk, GLib, Gtk
 
     if not schema_ok():
         die(f"{SCHEMA} not found — is the Ubuntu Dock extension installed?")
@@ -320,6 +320,15 @@ def build_ui() -> None:
     outer.set_border_width(8)
     scroll.add(outer)
 
+    live_hint = Gtk.Label(
+        label="Live apply is on — changes save as you go. Drag sliders (click and hold); "
+        "mouse-wheel scrolling on sliders is disabled.",
+        xalign=0,
+    )
+    live_hint.set_line_wrap(True)
+    live_hint.get_style_context().add_class("dim-label")
+    outer.pack_start(live_hint, False, False, 0)
+
     def section(title: str) -> Gtk.Box:
         frame = Gtk.Frame(label=title)
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
@@ -335,6 +344,62 @@ def build_ui() -> None:
         h.pack_start(lab, False, False, 0)
         h.pack_start(widget, True, True, 0)
         parent.pack_start(h, False, False, 0)
+
+    suppress_auto = {"on": True}  # ignore signals while hydrating widgets
+    auto_timer: dict[str, int | None] = {"id": None}
+
+    def block_scroll(_widget: Gtk.Widget, _event: Gdk.EventScroll) -> bool:
+        # Force click-and-drag (or keyboard) — no accidental wheel jumps.
+        return True
+
+    def make_scale_with_steppers(
+        adj: Gtk.Adjustment,
+        digits: int,
+        value_label: Gtk.Label | None = None,
+    ) -> tuple[Gtk.Box, Gtk.Scale]:
+        scale = Gtk.Scale(orientation=Gtk.Orientation.HORIZONTAL, adjustment=adj)
+        scale.set_digits(digits)
+        scale.set_hexpand(True)
+        scale.set_draw_value(False)
+        scale.set_can_focus(True)
+        scale.set_tooltip_text("Click and drag · use ← → keys or − / + for small steps")
+        scale.connect("scroll-event", block_scroll)
+
+        minus = Gtk.Button(label="−")
+        plus = Gtk.Button(label="+")
+        minus.set_tooltip_text("Decrease")
+        plus.set_tooltip_text("Increase")
+        for b in (minus, plus):
+            b.set_can_focus(True)
+            b.set_size_request(36, 32)
+
+        step = adj.get_step_increment() or (1 if digits == 0 else 0.01)
+
+        def bump(delta: float, _b: Gtk.Button | None = None) -> None:
+            adj.set_value(max(adj.get_lower(), min(adj.get_upper(), adj.get_value() + delta)))
+
+        minus.connect("clicked", lambda _b: bump(-step))
+        plus.connect("clicked", lambda _b: bump(step))
+
+        if value_label is not None:
+
+            def sync_label(_a: Gtk.Adjustment | None = None) -> None:
+                if digits == 0:
+                    value_label.set_text(str(int(adj.get_value())))
+                else:
+                    value_label.set_text(f"{adj.get_value():.{digits}f}")
+
+            adj.connect("value-changed", sync_label)
+            sync_label()
+
+        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        box.pack_start(minus, False, False, 0)
+        box.pack_start(scale, True, True, 0)
+        box.pack_start(plus, False, False, 0)
+        if value_label is not None:
+            value_label.set_width_chars(5)
+            box.pack_start(value_label, False, False, 0)
+        return box, scale
 
     # --- Named presets ---
     preset_box = section("Named presets")
@@ -360,18 +425,8 @@ def build_ui() -> None:
         step_increment=1,
         page_increment=4,
     )
-    icon_scale = Gtk.Scale(orientation=Gtk.Orientation.HORIZONTAL, adjustment=icon_adj)
-    icon_scale.set_digits(0)
-    icon_scale.set_hexpand(True)
     icon_value = Gtk.Label(label=str(int(icon_adj.get_value())))
-
-    def on_icon(_s: Gtk.Scale) -> None:
-        icon_value.set_text(str(int(icon_scale.get_value())))
-
-    icon_scale.connect("value-changed", on_icon)
-    icon_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-    icon_row.pack_start(icon_scale, True, True, 0)
-    icon_row.pack_start(icon_value, False, False, 0)
+    icon_row, icon_scale = make_scale_with_steppers(icon_adj, 0, icon_value)
     row(size_box, "Icon size", icon_row)
 
     # --- Position ---
@@ -443,28 +498,26 @@ def build_ui() -> None:
     # --- Timing ---
     time_box = section("Hover / animation timing")
 
-    def delay_scale(key: str, lo: float, hi: float) -> Gtk.Scale:
+    def delay_adj(key: str, lo: float, hi: float) -> Gtk.Adjustment:
         try:
             val = float(gget(key))
         except ValueError:
             val = lo
-        adj = Gtk.Adjustment(value=val, lower=lo, upper=hi, step_increment=0.01, page_increment=0.05)
-        scale = Gtk.Scale(orientation=Gtk.Orientation.HORIZONTAL, adjustment=adj)
-        scale.set_digits(2)
-        scale.set_hexpand(True)
-        return scale
+        return Gtk.Adjustment(value=val, lower=lo, upper=hi, step_increment=0.01, page_increment=0.05)
 
-    show_delay = delay_scale("show-delay", 0.0, 1.0)
-    hide_delay = delay_scale("hide-delay", 0.0, 1.0)
-    anim_time = delay_scale("animation-time", 0.0, 1.0)
-    row(time_box, "Show delay (s)", show_delay)
-    row(time_box, "Hide delay (s)", hide_delay)
-    row(time_box, "Animation (s)", anim_time)
+    show_row, show_delay = make_scale_with_steppers(delay_adj("show-delay", 0.0, 1.0), 2, Gtk.Label())
+    hide_row, hide_delay = make_scale_with_steppers(delay_adj("hide-delay", 0.0, 1.0), 2, Gtk.Label())
+    anim_row, anim_time = make_scale_with_steppers(delay_adj("animation-time", 0.0, 1.0), 2, Gtk.Label())
+    row(time_box, "Show delay (s)", show_row)
+    row(time_box, "Hide delay (s)", hide_row)
+    row(time_box, "Animation (s)", anim_row)
 
     # --- Look ---
     look_box = section("Look")
-    opacity = delay_scale("background-opacity", 0.0, 1.0)
-    row(look_box, "Background opacity", opacity)
+    opacity_row, opacity = make_scale_with_steppers(
+        delay_adj("background-opacity", 0.0, 1.0), 2, Gtk.Label()
+    )
+    row(look_box, "Background opacity", opacity_row)
 
     color_entry = Gtk.Entry()
     bg = gget("background-color")
@@ -517,7 +570,7 @@ def build_ui() -> None:
         indicator_bottom.set_active(False)
     look_box.pack_start(indicator_bottom, False, False, 0)
 
-    status = Gtk.Label(label="", xalign=0)
+    status = Gtk.Label(label="Ready — live apply enabled.", xalign=0)
     status.set_line_wrap(True)
     outer.pack_start(status, False, False, 0)
 
@@ -554,96 +607,133 @@ def build_ui() -> None:
         settings["show-show-apps-button"] = "true" if show_apps.get_active() else "false"
         return settings
 
+    def apply_indicator_pref() -> str:
+        try:
+            import indicators_patch as _ind
+
+            if indicator_bottom.get_active():
+                return _ind.apply_patch()
+            return _ind.remove_patch()
+        except Exception as exc:
+            return f"Indicator patch: {exc}"
+
+    def auto_apply_now(_source: str = "") -> bool:
+        auto_timer["id"] = None
+        if suppress_auto["on"]:
+            return False
+        try:
+            settings = collect_settings()
+            apply_map(settings)
+            msg = f"Live · applied {len(settings)} settings"
+            if _source:
+                msg += f" ({_source})"
+            # Indicator toggle needs sudo — only when that control was the source.
+            if _source == "indicators":
+                msg += "\n" + apply_indicator_pref()
+            status.set_text(msg)
+        except subprocess.CalledProcessError as exc:
+            status.set_text(f"Live apply failed: {exc}")
+        return False
+
+    def schedule_auto_apply(source: str = "", delay_ms: int = 120) -> None:
+        if suppress_auto["on"]:
+            return
+        if auto_timer["id"] is not None:
+            GLib.source_remove(auto_timer["id"])
+        auto_timer["id"] = GLib.timeout_add(delay_ms, auto_apply_now, source)
+
     def collect_and_apply(extra: dict[str, str] | None = None) -> None:
         settings = extra if extra is not None else collect_settings()
         apply_map(settings)
         status.set_text(f"Applied {len(settings)} settings.")
 
     def load_from_gsettings() -> None:
-        icon_scale.set_value(float(gget("dash-max-icon-size")))
-        cur = gget("dock-position")
-        if cur in POSITIONS:
-            pos_combo.set_active_id(cur)
-        preset = detect_stay_preset()
-        for rb, (pid, _l, _k) in zip(stay_group, STAY_PRESETS):
-            rb.set_active(pid == preset)
-        pressure.set_active(gget("require-pressure-to-show") == "true")
-        show_delay.set_value(float(gget("show-delay")))
-        hide_delay.set_value(float(gget("hide-delay")))
-        anim_time.set_value(float(gget("animation-time")))
-        opacity.set_value(float(gget("background-opacity")))
-        bg_now = gget("background-color")
-        if not bg_now.startswith("#"):
-            bg_now = f"#{bg_now}"
-        color_entry.set_text(bg_now)
-        rgba = Gdk.RGBA()
-        if rgba.parse(bg_now):
-            color_btn.set_rgba(rgba)
-        if schema_has_key("running-indicator-style"):
-            ind = gget("running-indicator-style")
-            if indicator_combo.get_active_id() != ind:
-                if ind not in INDICATOR_STYLES:
-                    indicator_combo.append(ind, ind)
-                indicator_combo.set_active_id(ind)
-        if schema_has_key("click-action"):
-            click = gget("click-action")
-            if click_combo.get_active_id() != click:
-                if click not in dict(CLICK_ACTIONS):
-                    click_combo.append(click, click)
-                click_combo.set_active_id(click)
-        if schema_has_key("isolate-workspaces"):
-            isolate_ws.set_active(gget("isolate-workspaces") == "true")
-        if schema_has_key("isolate-monitors"):
-            isolate_mon.set_active(gget("isolate-monitors") == "true")
-        if schema_has_key("multi-monitor"):
-            multi_mon.set_active(gget("multi-monitor") == "true")
-        if schema_has_key("show-apps-at-top"):
-            apps_top.set_active(gget("show-apps-at-top") == "true")
-        if schema_has_key("show-show-apps-button"):
-            show_apps.set_active(gget("show-show-apps-button") == "true")
-        status.set_text("Reloaded from current dock settings.")
-
-    def on_apply(_b: Gtk.Button) -> None:
+        suppress_auto["on"] = True
         try:
-            collect_and_apply()
+            icon_scale.set_value(float(gget("dash-max-icon-size")))
+            cur = gget("dock-position")
+            if cur in POSITIONS:
+                pos_combo.set_active_id(cur)
+            preset = detect_stay_preset()
+            for rb, (pid, _l, _k) in zip(stay_group, STAY_PRESETS):
+                rb.set_active(pid == preset)
+            pressure.set_active(gget("require-pressure-to-show") == "true")
+            show_delay.set_value(float(gget("show-delay")))
+            hide_delay.set_value(float(gget("hide-delay")))
+            anim_time.set_value(float(gget("animation-time")))
+            opacity.set_value(float(gget("background-opacity")))
+            bg_now = gget("background-color")
+            if not bg_now.startswith("#"):
+                bg_now = f"#{bg_now}"
+            color_entry.set_text(bg_now)
+            rgba = Gdk.RGBA()
+            if rgba.parse(bg_now):
+                color_btn.set_rgba(rgba)
+            if schema_has_key("running-indicator-style"):
+                ind = gget("running-indicator-style")
+                if indicator_combo.get_active_id() != ind:
+                    if ind not in INDICATOR_STYLES:
+                        indicator_combo.append(ind, ind)
+                    indicator_combo.set_active_id(ind)
+            if schema_has_key("click-action"):
+                click = gget("click-action")
+                if click_combo.get_active_id() != click:
+                    if click not in dict(CLICK_ACTIONS):
+                        click_combo.append(click, click)
+                    click_combo.set_active_id(click)
+            if schema_has_key("isolate-workspaces"):
+                isolate_ws.set_active(gget("isolate-workspaces") == "true")
+            if schema_has_key("isolate-monitors"):
+                isolate_mon.set_active(gget("isolate-monitors") == "true")
+            if schema_has_key("multi-monitor"):
+                multi_mon.set_active(gget("multi-monitor") == "true")
+            if schema_has_key("show-apps-at-top"):
+                apps_top.set_active(gget("show-apps-at-top") == "true")
+            if schema_has_key("show-show-apps-button"):
+                show_apps.set_active(gget("show-show-apps-button") == "true")
             try:
                 import indicators_patch as _ind
 
-                if indicator_bottom.get_active():
-                    msg = _ind.apply_patch()
-                else:
-                    msg = _ind.remove_patch()
-                status.set_text(status.get_text() + "\n" + msg)
-            except Exception as exc:
-                status.set_text(status.get_text() + f"\nIndicator patch: {exc}")
-        except subprocess.CalledProcessError as exc:
-            status.set_text(f"Failed to apply: {exc}")
+                indicator_bottom.set_active(_ind.is_active())
+            except Exception:
+                pass
+            status.set_text("Reloaded from current dock settings.")
+        finally:
+            suppress_auto["on"] = False
 
     def on_defaults(_b: Gtk.Button) -> None:
         try:
+            suppress_auto["on"] = True
             apply_map(SCRIPT_DEFAULTS)
             load_from_gsettings()
             preset_combo.set_active_id("")
             status.set_text("Restored script defaults (same as ./dock.sh apply).")
         except subprocess.CalledProcessError as exc:
             status.set_text(f"Failed: {exc}")
+        finally:
+            suppress_auto["on"] = False
 
     def on_reload(_b: Gtk.Button) -> None:
         load_from_gsettings()
         preset_combo.set_active_id("")
 
     def on_named_preset(_c: Gtk.ComboBoxText) -> None:
+        if suppress_auto["on"]:
+            return
         pid = preset_combo.get_active_id() or ""
         if not pid:
             return
         for nid, _label, keys in NAMED_PRESETS:
             if nid == pid:
                 try:
+                    suppress_auto["on"] = True
                     apply_map(keys)
                     load_from_gsettings()
                     status.set_text(f"Applied named preset: {_label}")
                 except subprocess.CalledProcessError as exc:
                     status.set_text(f"Failed: {exc}")
+                finally:
+                    suppress_auto["on"] = False
                 return
 
     preset_combo.connect("changed", on_named_preset)
@@ -669,23 +759,63 @@ def build_ui() -> None:
                 status.set_text("Invalid preset file: missing settings object.")
                 return
             cleaned = {str(k): str(v) for k, v in settings.items() if str(k) in EXPORTABLE_KEYS}
+            suppress_auto["on"] = True
             apply_map(cleaned)
             load_from_gsettings()
             preset_combo.set_active_id("")
             status.set_text(f"Imported {len(cleaned)} keys from {PRESET_FILE}")
         except (OSError, json.JSONDecodeError, subprocess.CalledProcessError) as exc:
             status.set_text(f"Import failed: {exc}")
+        finally:
+            suppress_auto["on"] = False
+
+    # Wire live apply (sliders debounced; toggles/combos immediate).
+    for scale, name in (
+        (icon_scale, "size"),
+        (show_delay, "timing"),
+        (hide_delay, "timing"),
+        (anim_time, "timing"),
+        (opacity, "look"),
+    ):
+        scale.connect("value-changed", lambda _s, n=name: schedule_auto_apply(n, 140))
+
+        def _on_release(_s: Gtk.Widget, _e: Gdk.EventButton, n: str = name) -> bool:
+            schedule_auto_apply(n, 0)
+            return False
+
+        scale.connect("button-release-event", _on_release)
+
+    pos_combo.connect("changed", lambda _c: schedule_auto_apply("position", 0))
+    click_combo.connect("changed", lambda _c: schedule_auto_apply("click", 0))
+    indicator_combo.connect("changed", lambda _c: schedule_auto_apply("indicator", 0))
+    for rb in stay_group:
+        rb.connect("toggled", lambda _b: schedule_auto_apply("stay", 0) if _b.get_active() else None)
+    for chk, name in (
+        (pressure, "pressure"),
+        (isolate_ws, "behavior"),
+        (isolate_mon, "behavior"),
+        (multi_mon, "behavior"),
+        (apps_top, "behavior"),
+        (show_apps, "behavior"),
+    ):
+        chk.connect("toggled", lambda _b, n=name: schedule_auto_apply(n, 0))
+    indicator_bottom.connect("toggled", lambda _b: schedule_auto_apply("indicators", 0))
+    color_btn.connect("color-set", lambda _b: schedule_auto_apply("color", 0))
+    color_entry.connect("activate", lambda _e: schedule_auto_apply("color", 0))
+
+    def _color_focus_out(_e: Gtk.Widget, _ev: Gdk.EventFocus) -> bool:
+        schedule_auto_apply("color", 0)
+        return False
+
+    color_entry.connect("focus-out-event", _color_focus_out)
 
     buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
     buttons.set_homogeneous(False)
-    apply_btn = Gtk.Button(label="Apply")
-    apply_btn.get_style_context().add_class("suggested-action")
     defaults_btn = Gtk.Button(label="Reset to script defaults")
     reload_btn = Gtk.Button(label="Reload")
     export_btn = Gtk.Button(label="Export preset")
     import_btn = Gtk.Button(label="Import preset")
     close_btn = Gtk.Button(label="Close")
-    apply_btn.connect("clicked", on_apply)
     defaults_btn.connect("clicked", on_defaults)
     reload_btn.connect("clicked", on_reload)
     export_btn.connect("clicked", on_export)
@@ -696,9 +826,9 @@ def build_ui() -> None:
     buttons.pack_start(export_btn, False, False, 0)
     buttons.pack_start(import_btn, False, False, 0)
     buttons.pack_end(close_btn, False, False, 0)
-    buttons.pack_end(apply_btn, False, False, 0)
     outer.pack_start(buttons, False, False, 0)
 
+    suppress_auto["on"] = False
     win.show_all()
     Gtk.main()
 

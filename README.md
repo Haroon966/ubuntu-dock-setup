@@ -99,8 +99,10 @@ Needs `python3` and GTK bindings:
 sudo apt install python3-gi gir1.2-gtk-3.0
 ```
 
-The UI reads the live `dash-to-dock` settings, applies changes immediately via
-`gsettings`, and can **Reset to script defaults** (same values as `./dock.sh apply`).
+The UI reads the live `dash-to-dock` settings and **applies changes as you edit**
+(no Apply button). Drag sliders with click-and-hold (mouse-wheel on sliders is
+disabled); use **− / +** or arrow keys for small steps. You can still **Reset to
+script defaults** (same values as `./dock.sh apply`).
 
 When running from one-shot (`curl | bash`), `dock.sh` auto-downloads `dock-config.py`
 to `${XDG_CACHE_HOME:-~/.cache}/ubuntu-dock-setup/` if the file is not present locally.
