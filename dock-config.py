@@ -12,6 +12,9 @@ from pathlib import Path
 SCHEMA = "org.gnome.shell.extensions.dash-to-dock"
 PRESET_DIR = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "ubuntu-dock-setup"
 PRESET_FILE = PRESET_DIR / "preset.json"
+_HERE = Path(__file__).resolve().parent
+if str(_HERE) not in sys.path:
+    sys.path.insert(0, str(_HERE))
 
 # Matches dock.sh SETTINGS for "Reset to script defaults".
 SCRIPT_DEFAULTS = {
@@ -503,6 +506,17 @@ def build_ui() -> None:
         indicator_combo.set_active_id(cur_ind)
     row(look_box, "Running indicator", indicator_combo)
 
+    indicator_bottom = Gtk.CheckButton(
+        label="Always keep window indicators under icons (even if dock is left/right/top)"
+    )
+    try:
+        import indicators_patch as _ind
+
+        indicator_bottom.set_active(_ind.is_active())
+    except Exception:
+        indicator_bottom.set_active(False)
+    look_box.pack_start(indicator_bottom, False, False, 0)
+
     status = Gtk.Label(label="", xalign=0)
     status.set_line_wrap(True)
     outer.pack_start(status, False, False, 0)
@@ -592,6 +606,16 @@ def build_ui() -> None:
     def on_apply(_b: Gtk.Button) -> None:
         try:
             collect_and_apply()
+            try:
+                import indicators_patch as _ind
+
+                if indicator_bottom.get_active():
+                    msg = _ind.apply_patch()
+                else:
+                    msg = _ind.remove_patch()
+                status.set_text(status.get_text() + "\n" + msg)
+            except Exception as exc:
+                status.set_text(status.get_text() + f"\nIndicator patch: {exc}")
         except subprocess.CalledProcessError as exc:
             status.set_text(f"Failed to apply: {exc}")
 

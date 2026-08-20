@@ -5,8 +5,10 @@ set -euo pipefail
 
 SCHEMA=org.gnome.shell.extensions.dash-to-dock
 UI_RAW_URL_DEFAULT="https://raw.githubusercontent.com/codebyshoaib/ubuntu-dock-setup/main/dock-config.py"
+UI_PATCH_URL_DEFAULT="https://raw.githubusercontent.com/codebyshoaib/ubuntu-dock-setup/main/indicators_patch.py"
 UI_CACHE_DIR_DEFAULT="${XDG_CACHE_HOME:-$HOME/.cache}/ubuntu-dock-setup"
 UI_CACHE_FILE_DEFAULT="$UI_CACHE_DIR_DEFAULT/dock-config.py"
+UI_PATCH_CACHE_DEFAULT="$UI_CACHE_DIR_DEFAULT/indicators_patch.py"
 
 # key=value, applied in order. See README for what each one does.
 SETTINGS=(
@@ -108,32 +110,33 @@ verify() {
 }
 
 config() {
-  local here script ui_url cache_file
+  local here script ui_url cache_file patch_url patch_cache
   here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
   script="$here/dock-config.py"
   ui_url="${DOCK_SETUP_UI_URL:-$UI_RAW_URL_DEFAULT}"
   cache_file="${DOCK_SETUP_UI_CACHE_FILE:-$UI_CACHE_FILE_DEFAULT}"
+  patch_url="${DOCK_SETUP_PATCH_URL:-$UI_PATCH_URL_DEFAULT}"
+  patch_cache="${DOCK_SETUP_PATCH_CACHE_FILE:-$UI_PATCH_CACHE_DEFAULT}"
+
+  download_file() {
+    local url="$1" dest="$2"
+    if command -v curl >/dev/null; then
+      curl -fsSL "$url" -o "$dest"
+    elif command -v wget >/dev/null; then
+      wget -qO "$dest" "$url"
+    else
+      return 1
+    fi
+  }
 
   # one-shot support: if dock-config.py isn't local, fetch/cached copy.
   if [[ ! -f "$script" ]]; then
     script="$cache_file"
     if [[ ! -f "$script" ]]; then
       mkdir -p "$(dirname "$script")"
-      if command -v curl >/dev/null; then
-        if ! curl -fsSL "$ui_url" -o "$script"; then
-          echo "error: failed to download dock-config.py from $ui_url" >&2
-          echo "hint: run './dock.sh apply' or clone this repo to use local UI." >&2
-          return 1
-        fi
-      elif command -v wget >/dev/null; then
-        if ! wget -qO "$script" "$ui_url"; then
-          echo "error: failed to download dock-config.py from $ui_url" >&2
-          echo "hint: run './dock.sh apply' or clone this repo to use local UI." >&2
-          return 1
-        fi
-      else
-        echo "error: dock-config.py not found and curl/wget unavailable to fetch it." >&2
-        echo "hint: install curl or clone this repo; then run './dock.sh config'." >&2
+      if ! download_file "$ui_url" "$script"; then
+        echo "error: failed to download dock-config.py from $ui_url" >&2
+        echo "hint: run './dock.sh apply' or clone this repo to use local UI." >&2
         return 1
       fi
       if [[ -n "${DOCK_SETUP_EXPECT_SHA256:-}" ]]; then
@@ -158,12 +161,28 @@ config() {
       fi
       chmod +x "$script" || true
     fi
+    # Companion patch module for "indicators under icons".
+    if [[ ! -f "$patch_cache" ]]; then
+      mkdir -p "$(dirname "$patch_cache")"
+      download_file "$patch_url" "$patch_cache" || true
+    fi
   fi
   if ! command -v python3 >/dev/null; then
     echo "error: python3 not found" >&2
     return 1
   fi
   python3 "$script"
+}
+
+indicators_patch() {
+  local here patch
+  here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+  patch="$here/indicators_patch.py"
+  if [[ ! -f "$patch" ]]; then
+    echo "error: indicators_patch.py not found next to dock.sh" >&2
+    return 1
+  fi
+  python3 "$patch" "$@"
 }
 
 should_launch_ui() {
@@ -208,5 +227,8 @@ case "${1:-setup}" in
   show)   for k in $(gsettings list-keys "$SCHEMA" | sort); do
             printf '%-42s %s\n' "$k" "$(gsettings get "$SCHEMA" "$k")"; done ;;
   config) config ;;
-  *)      echo "usage: dock.sh [setup|apply|verify|reset|show|config]" >&2; exit 2 ;;
+  indicators-bottom) indicators_patch apply ;;
+  indicators-edge)   indicators_patch remove ;;
+  indicators-status) indicators_patch status ;;
+  *)      echo "usage: dock.sh [setup|apply|verify|reset|show|config|indicators-bottom|indicators-edge|indicators-status]" >&2; exit 2 ;;
 esac

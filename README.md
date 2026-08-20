@@ -139,6 +139,20 @@ curl -fsSL "$URL" | bash
 DOCK_SETUP_EXPECT_SHA256='…' curl -fsSL "$URL" | bash -s -- config
 ```
 
+### Running indicator position
+
+By default Ubuntu Dock rotates the red/window indicators to the dock edge
+(left/right/top). To keep them **always under the icon**:
+
+```bash
+./dock.sh indicators-bottom   # apply (user-local ubuntu-dock override)
+./dock.sh indicators-edge     # undo
+./dock.sh indicators-status   # active | inactive
+```
+
+Or use the checkbox in `./dock.sh config`. Restart GNOME Shell afterwards
+(X11: Alt+F2 → `r` → Enter; Wayland: log out/in).
+
 ## Requirements
 
 Ubuntu with the Ubuntu Dock extension (`ubuntu-dock@ubuntu.com`, the default on
