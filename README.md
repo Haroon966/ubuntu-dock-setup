@@ -1,33 +1,13 @@
 # ubuntu-dock-setup
 
-<br />
+![Floating Ubuntu Dock — full screen for your windows, no strut, no wasted pixels](docs/hero-banner.jpg)
 
-<div align="center">
-
-### Floating Ubuntu Dock
-
-**Full screen for your windows — no strut, no wasted pixels.**
-
-<br />
-
-<img
-  src="docs/hero-crop.jpg"
-  alt="Centered floating translucent Ubuntu Dock with running indicators under the icons"
-  width="880"
-/>
-
-<br />
-
-`curl -fsSL …/dock.sh | bash` · GTK config UI · indicators stay under icons
-
-[Install](#one-shot-setup) ·
-[Configure UI](#configure-from-ui) ·
-[Screenshot](#screenshot) ·
-[Indicators](#running-indicator-position)
-
-</div>
-
-<br />
+<p align="center">
+  <a href="#one-shot-setup">Install</a> ·
+  <a href="#configure-from-ui">Configure UI</a> ·
+  <a href="#screenshot">Screenshot</a> ·
+  <a href="#running-indicator-position">Indicators</a>
+</p>
 
 ---
 
@@ -44,13 +24,7 @@ shot and verifies the result.
 
 Full desktop view of the floating dock (original capture — not modified):
 
-<p align="center">
-  <img
-    src="docs/hero.jpg"
-    alt="Full desktop screenshot: floating bottom dock on a dark Ubuntu desktop"
-    width="920"
-  />
-</p>
+![Full desktop screenshot: floating bottom dock on a dark Ubuntu desktop](docs/hero.jpg)
 
 <p align="center"><sub>Floating pill dock · translucent bar · running indicator under the active app</sub></p>
 
