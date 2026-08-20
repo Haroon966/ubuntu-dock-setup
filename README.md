@@ -1,5 +1,22 @@
 # ubuntu-dock-setup
 
+<p align="center">
+  <strong>Floating Ubuntu Dock — full screen for your windows</strong><br/>
+  One script. One GTK UI. No strut. No wasted pixels.
+</p>
+
+<p align="center">
+  <img src="docs/hero.jpg" alt="Floating translucent Ubuntu Dock centered at the bottom of the desktop" width="920" />
+</p>
+
+<p align="center">
+  <a href="#one-shot-setup"><img src="https://img.shields.io/badge/install-curl%20%7C%20bash-2ea44f?style=flat-square" alt="Install with curl | bash" /></a>
+  <a href="#configure-from-ui"><img src="https://img.shields.io/badge/UI-GTK%20config-0A66C2?style=flat-square" alt="GTK config UI" /></a>
+  <a href="#running-indicator-position"><img src="https://img.shields.io/badge/indicators-always%20under%20icons-6e40c9?style=flat-square" alt="Indicators under icons" /></a>
+</p>
+
+---
+
 One script that turns the stock Ubuntu Dock into a floating, translucent bottom bar
 that **doesn't steal screen space** from your windows.
 
