@@ -91,6 +91,22 @@ verify() {
   [[ $fails -eq 0 ]] && echo "verify: ok" || { echo "verify: $fails problem(s)" >&2; exit 1; }
 }
 
+config() {
+  local here script
+  here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+  script="$here/dock-config.py"
+  if [[ ! -f "$script" ]]; then
+    echo "error: dock-config.py not found next to dock.sh ($script)" >&2
+    echo "clone the repo or download dock-config.py alongside this script." >&2
+    exit 1
+  fi
+  if ! command -v python3 >/dev/null; then
+    echo "error: python3 not found" >&2
+    exit 1
+  fi
+  exec python3 "$script"
+}
+
 require_schema
 case "${1:-apply}" in
   apply)  apply; verify ;;
@@ -98,5 +114,6 @@ case "${1:-apply}" in
   reset)  gsettings reset-recursively "$SCHEMA"; echo "reset to Ubuntu defaults" ;;
   show)   for k in $(gsettings list-keys "$SCHEMA" | sort); do
             printf '%-42s %s\n' "$k" "$(gsettings get "$SCHEMA" "$k")"; done ;;
-  *)      echo "usage: dock.sh [apply|verify|reset|show]" >&2; exit 2 ;;
+  config) config ;;
+  *)      echo "usage: dock.sh [apply|verify|reset|show|config]" >&2; exit 2 ;;
 esac
