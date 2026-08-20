@@ -15,8 +15,13 @@ shot and verifies the result.
 curl -fsSL https://raw.githubusercontent.com/codebyshoaib/ubuntu-dock-setup/main/dock.sh | bash
 ```
 
-That's the whole install. No clone, no sudo, no dependencies to add, nothing written
-outside dconf. Takes effect immediately — no logout or shell restart.
+That command now runs `setup` by default:
+
+- On an interactive desktop session, it opens the config UI first.
+- On headless/non-interactive sessions, it applies the default preset (`apply + verify`).
+
+No clone, no sudo, nothing written outside dconf except a cached UI file when needed.
+Takes effect immediately — no logout or shell restart.
 
 Other modes, same way:
 
@@ -25,6 +30,8 @@ URL=https://raw.githubusercontent.com/codebyshoaib/ubuntu-dock-setup/main/dock.s
 curl -fsSL $URL | bash -s -- verify   # check state matches (exit 1 on drift)
 curl -fsSL $URL | bash -s -- reset    # back to Ubuntu defaults
 curl -fsSL $URL | bash -s -- show     # dump every key with its current value
+curl -fsSL $URL | bash -s -- apply    # apply default preset directly (skip UI)
+curl -fsSL $URL | bash -s -- config   # open UI directly
 ```
 
 Or read it first, which you should before piping anyone's script into your shell:
@@ -55,6 +62,9 @@ sudo apt install python3-gi gir1.2-gtk-3.0
 The UI reads the live `dash-to-dock` settings, applies changes immediately via
 `gsettings`, and can **Reset to script defaults** (same values as `./dock.sh apply`).
 
+When running from one-shot (`curl | bash`), `dock.sh` auto-downloads `dock-config.py`
+to `${XDG_CACHE_HOME:-~/.cache}/ubuntu-dock-setup/` if the file is not present locally.
+
 Stay / hide presets in the UI:
 
 | Preset | Effect |
@@ -73,7 +83,21 @@ the UI. That is intentional — verify is for the one-shot preset, not a live UI
 lock.
 
 The curl one-shot only downloads `dock.sh`. For the UI, clone the repo (or place
-`dock-config.py` next to `dock.sh`).
+`dock-config.py` next to `dock.sh`), otherwise `dock.sh config` fetches a cached copy.
+
+### One-shot edge-case controls
+
+```bash
+# Disable UI path, always apply defaults
+DOCK_SETUP_NO_UI=1 curl -fsSL "$URL" | bash
+
+# Force UI path (if desktop env is available)
+DOCK_SETUP_FORCE_UI=1 curl -fsSL "$URL" | bash
+
+# Pin UI script source
+DOCK_SETUP_UI_URL="https://raw.githubusercontent.com/codebyshoaib/ubuntu-dock-setup/main/dock-config.py" \
+curl -fsSL "$URL" | bash
+```
 
 ## Requirements
 

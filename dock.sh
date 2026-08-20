@@ -4,6 +4,9 @@
 set -euo pipefail
 
 SCHEMA=org.gnome.shell.extensions.dash-to-dock
+UI_RAW_URL_DEFAULT="https://raw.githubusercontent.com/codebyshoaib/ubuntu-dock-setup/main/dock-config.py"
+UI_CACHE_DIR_DEFAULT="${XDG_CACHE_HOME:-$HOME/.cache}/ubuntu-dock-setup"
+UI_CACHE_FILE_DEFAULT="$UI_CACHE_DIR_DEFAULT/dock-config.py"
 
 # key=value, applied in order. See README for what each one does.
 SETTINGS=(
@@ -92,28 +95,81 @@ verify() {
 }
 
 config() {
-  local here script
+  local here script ui_url cache_file
   here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
   script="$here/dock-config.py"
+  ui_url="${DOCK_SETUP_UI_URL:-$UI_RAW_URL_DEFAULT}"
+  cache_file="${DOCK_SETUP_UI_CACHE_FILE:-$UI_CACHE_FILE_DEFAULT}"
+
+  # one-shot support: if dock-config.py isn't local, fetch/cached copy.
   if [[ ! -f "$script" ]]; then
-    echo "error: dock-config.py not found next to dock.sh ($script)" >&2
-    echo "clone the repo or download dock-config.py alongside this script." >&2
-    exit 1
+    script="$cache_file"
+    if [[ ! -f "$script" ]]; then
+      mkdir -p "$(dirname "$script")"
+      if command -v curl >/dev/null; then
+        if ! curl -fsSL "$ui_url" -o "$script"; then
+          echo "error: failed to download dock-config.py from $ui_url" >&2
+          echo "hint: run './dock.sh apply' or clone this repo to use local UI." >&2
+          return 1
+        fi
+      elif command -v wget >/dev/null; then
+        if ! wget -qO "$script" "$ui_url"; then
+          echo "error: failed to download dock-config.py from $ui_url" >&2
+          echo "hint: run './dock.sh apply' or clone this repo to use local UI." >&2
+          return 1
+        fi
+      else
+        echo "error: dock-config.py not found and curl/wget unavailable to fetch it." >&2
+        echo "hint: install curl or clone this repo; then run './dock.sh config'." >&2
+        return 1
+      fi
+      chmod +x "$script" || true
+    fi
   fi
   if ! command -v python3 >/dev/null; then
     echo "error: python3 not found" >&2
-    exit 1
+    return 1
   fi
-  exec python3 "$script"
+  python3 "$script"
+}
+
+should_launch_ui() {
+  # User override to disable UI path in one-shot.
+  if [[ "${DOCK_SETUP_NO_UI:-}" == "1" ]]; then
+    return 1
+  fi
+  # Force UI path if explicitly requested.
+  if [[ "${DOCK_SETUP_FORCE_UI:-}" == "1" ]]; then
+    return 0
+  fi
+  # Only for interactive desktop sessions.
+  [[ -t 0 && -t 1 ]] || return 1
+  [[ -n "${DISPLAY:-}" || -n "${WAYLAND_DISPLAY:-}" ]] || return 1
+  return 0
+}
+
+setup() {
+  if should_launch_ui; then
+    echo "interactive desktop detected — launching dock config UI..."
+    if ! config; then
+      echo "warning: UI failed; applying default dock preset instead." >&2
+      apply
+      verify
+    fi
+  else
+    apply
+    verify
+  fi
 }
 
 require_schema
-case "${1:-apply}" in
+case "${1:-setup}" in
+  setup)  setup ;;
   apply)  apply; verify ;;
   verify) verify ;;
   reset)  gsettings reset-recursively "$SCHEMA"; echo "reset to Ubuntu defaults" ;;
   show)   for k in $(gsettings list-keys "$SCHEMA" | sort); do
             printf '%-42s %s\n' "$k" "$(gsettings get "$SCHEMA" "$k")"; done ;;
   config) config ;;
-  *)      echo "usage: dock.sh [apply|verify|reset|show|config]" >&2; exit 2 ;;
+  *)      echo "usage: dock.sh [setup|apply|verify|reset|show|config]" >&2; exit 2 ;;
 esac
