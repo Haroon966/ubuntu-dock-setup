@@ -36,6 +36,45 @@ cd ubuntu-dock-setup && ./dock.sh
 
 Idempotent — re-run it any time.
 
+## Configure from UI
+
+After cloning the repo, open a GTK dialog to change icon size, position, stay/hide
+behavior, hover delays, and look — without editing the script:
+
+```bash
+./dock.sh config
+# or: python3 dock-config.py
+```
+
+Needs `python3` and GTK bindings:
+
+```bash
+sudo apt install python3-gi gir1.2-gtk-3.0
+```
+
+The UI reads the live `dash-to-dock` settings, applies changes immediately via
+`gsettings`, and can **Reset to script defaults** (same values as `./dock.sh apply`).
+
+Stay / hide presets in the UI:
+
+| Preset | Effect |
+| --- | --- |
+| Floating — hide when any window covers | Default floating dock (`intellihide-mode=ALL_WINDOWS`) |
+| Floating — hide only for focused app | `FOCUS_APPLICATION_WINDOWS` |
+| Floating — hide only for maximized windows | `MAXIMIZED_WINDOWS` |
+| Pinned — reserve screen space | `dock-fixed=true` (strut back on) |
+
+Hover vs pressure: leave “Require pressure…” unchecked to reveal on simple edge hover
+(`require-pressure-to-show=false`). Timing sliders map to `show-delay`, `hide-delay`,
+and `animation-time`.
+
+`./dock.sh verify` still checks the **script defaults**, not whatever you last chose in
+the UI. That is intentional — verify is for the one-shot preset, not a live UI state
+lock.
+
+The curl one-shot only downloads `dock.sh`. For the UI, clone the repo (or place
+`dock-config.py` next to `dock.sh`).
+
 ## Requirements
 
 Ubuntu with the Ubuntu Dock extension (`ubuntu-dock@ubuntu.com`, the default on
@@ -44,7 +83,7 @@ isn't installed the script says so and exits 1 rather than half-applying.
 
 Binaries used: `gsettings`, `awk`, `grep`, `xprop` — all present on a stock Ubuntu
 desktop. The `xprop` strut check needs X11; on Wayland it's skipped and the remaining
-verification still runs.
+verification still runs. The optional config UI also needs `python3` and `python3-gi`.
 
 ## What it changes, and why
 
@@ -114,7 +153,7 @@ The dock ships these on and they're worth knowing:
 
 ## Variations
 
-Not applied by default; pick if they suit you better.
+Prefer `./dock.sh config` for interactive changes. Or set keys by hand:
 
 ```bash
 d=org.gnome.shell.extensions.dash-to-dock
@@ -135,4 +174,5 @@ gsettings set $d dock-fixed true
 Attempting `autohide=false` + `intellihide=false` to get a permanently visible
 overlapping dock is **not** supported by dash-to-dock — its documented modes are
 reserve-space or hide-when-covered, and that combination tends to leave the dock
-hidden. `intellihide-mode` is the supported way to control *when* it hides.
+hidden. `intellihide-mode` is the supported way to control *when* it hides. The
+config UI only offers the supported stay presets above.
