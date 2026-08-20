@@ -2,22 +2,26 @@
 """Force Ubuntu Dock running indicators to stay under icons (always bottom).
 
 dash-to-dock rotates BINARY/DOTS/etc. indicators to match dock-position (LEFT/RIGHT/TOP).
-There is no gsettings key for this. This helper installs a user-local copy of
-ubuntu-dock and disables that rotation.
+There is no gsettings key for this.
+
+Ubuntu loads ubuntu-dock from /usr/share (not ~/.local), so this tool patches the
+system appIconIndicators.js (with sudo + a user-owned backup).
 """
 from __future__ import annotations
 
 import argparse
 import re
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
 EXT_ID = "ubuntu-dock@ubuntu.com"
 SYSTEM_EXT = Path("/usr/share/gnome-shell/extensions") / EXT_ID
+SYSTEM_JS = SYSTEM_EXT / "appIconIndicators.js"
 LOCAL_EXT = Path.home() / ".local/share/gnome-shell/extensions" / EXT_ID
-TARGET = LOCAL_EXT / "appIconIndicators.js"
-STAMP = LOCAL_EXT / ".ubuntu-dock-setup-managed"
+BACKUP_DIR = Path.home() / ".local/share/ubuntu-dock-setup" / "backups"
+BACKUP_JS = BACKUP_DIR / "appIconIndicators.js.orig"
 MARKER = "// ubuntu-dock-setup:indicators-always-bottom"
 
 ROTATION_BLOCK_RE = re.compile(
@@ -39,59 +43,127 @@ PATCHED_BLOCK = """        // We draw for the bottom case and rotate the canvas 
 """
 
 
+def _file_has_marker(path: Path) -> bool:
+    return path.is_file() and MARKER in path.read_text(encoding="utf-8", errors="ignore")
+
+
+def active_extension_path() -> str | None:
+    try:
+        out = subprocess.run(
+            ["gnome-extensions", "info", EXT_ID],
+            check=False,
+            capture_output=True,
+            text=True,
+        ).stdout
+    except FileNotFoundError:
+        return None
+    for line in out.splitlines():
+        if line.strip().startswith("Path:"):
+            return line.split(":", 1)[1].strip()
+    return None
+
+
 def is_active() -> bool:
-    return TARGET.is_file() and MARKER in TARGET.read_text(encoding="utf-8", errors="ignore")
+    return _file_has_marker(SYSTEM_JS)
 
 
-def _ensure_local_copy() -> None:
-    if not SYSTEM_EXT.is_dir():
-        raise FileNotFoundError(f"system Ubuntu Dock not found at {SYSTEM_EXT}")
-    if LOCAL_EXT.exists() and not STAMP.exists() and not is_active():
+def _write_system_js(text: str) -> None:
+    """Write SYSTEM_JS via sudo (Ubuntu Dock is owned by root)."""
+    proc = subprocess.run(
+        ["sudo", "tee", str(SYSTEM_JS)],
+        input=text,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if proc.returncode != 0:
         raise RuntimeError(
-            f"local extension already exists at {LOCAL_EXT} and is not managed by this tool; "
-            "remove it first or apply the patch manually"
+            "could not write system Ubuntu Dock file (sudo required).\n"
+            f"sudo stderr: {proc.stderr.strip() or '(empty)'}"
         )
-    if STAMP.exists() or not LOCAL_EXT.exists():
-        if LOCAL_EXT.exists():
-            shutil.rmtree(LOCAL_EXT)
-        shutil.copytree(SYSTEM_EXT, LOCAL_EXT)
-        STAMP.write_text("managed-by-ubuntu-dock-setup\n", encoding="utf-8")
+
+
+def _ensure_backup() -> None:
+    if BACKUP_JS.is_file():
+        return
+    if not SYSTEM_JS.is_file():
+        raise FileNotFoundError(SYSTEM_JS)
+    BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(SYSTEM_JS, BACKUP_JS)
+
+
+def _cleanup_unused_local_copy() -> None:
+    # Local copies are ignored while Ubuntu loads the system extension.
+    stamp = LOCAL_EXT / ".ubuntu-dock-setup-managed"
+    if stamp.is_file() and LOCAL_EXT.is_dir():
+        shutil.rmtree(LOCAL_EXT)
 
 
 def apply_patch() -> str:
+    if not SYSTEM_JS.is_file():
+        raise FileNotFoundError(f"system Ubuntu Dock not found at {SYSTEM_JS}")
     if is_active():
-        return "already active: running indicators stay under icons"
-    _ensure_local_copy()
-    text = TARGET.read_text(encoding="utf-8")
+        path = active_extension_path() or str(SYSTEM_EXT)
+        return (
+            "already active on the live Ubuntu Dock.\n"
+            f"loaded path: {path}\n"
+            "if indicators still follow the dock edge, restart GNOME Shell "
+            "(X11: Alt+F2 → r → Enter; Wayland: log out/in)."
+        )
+
+    text = SYSTEM_JS.read_text(encoding="utf-8")
     if not ROTATION_BLOCK_RE.search(text):
         raise RuntimeError(
             "could not find indicator rotation block in appIconIndicators.js "
             "(Ubuntu Dock version may differ)"
         )
-    TARGET.write_text(ROTATION_BLOCK_RE.sub(PATCHED_BLOCK, text, count=1), encoding="utf-8")
+
+    _ensure_backup()
+    patched = ROTATION_BLOCK_RE.sub(PATCHED_BLOCK, text, count=1)
+    _write_system_js(patched)
+    _cleanup_unused_local_copy()
+
+    path = active_extension_path() or str(SYSTEM_EXT)
     return (
-        "applied: running indicators now stay under icons on left/right/top docks.\n"
-        "restart GNOME Shell to take effect (X11: Alt+F2, type r, Enter; Wayland: log out/in)."
+        "applied to the live system Ubuntu Dock (sudo).\n"
+        f"loaded path: {path}\n"
+        "running indicators now stay under icons on left/right/top docks.\n"
+        "restart GNOME Shell to take effect "
+        "(X11: Alt+F2 → r → Enter; Wayland: log out/in)."
     )
 
 
 def remove_patch() -> str:
-    if not LOCAL_EXT.exists():
-        return "nothing to remove (using system Ubuntu Dock)"
-    if STAMP.exists():
-        shutil.rmtree(LOCAL_EXT)
-        return (
-            "removed local override; indicators follow dock edge again.\n"
-            "restart GNOME Shell to take effect (X11: Alt+F2, type r, Enter; Wayland: log out/in)."
+    if not is_active() and not BACKUP_JS.is_file():
+        _cleanup_unused_local_copy()
+        return "nothing to remove (system Ubuntu Dock is unpatched)"
+
+    if BACKUP_JS.is_file():
+        _write_system_js(BACKUP_JS.read_text(encoding="utf-8"))
+    elif SYSTEM_JS.is_file() and is_active():
+        raise RuntimeError(
+            f"patched system file has no backup at {BACKUP_JS}; "
+            "restore Ubuntu Dock from apt or reinstall gnome-shell-extension-ubuntu-dock"
         )
-    if is_active():
-        # Unmanaged local tree but still patched — restore rotation from system file.
-        system_js = SYSTEM_EXT / "appIconIndicators.js"
-        if not system_js.is_file():
-            raise FileNotFoundError(system_js)
-        TARGET.write_text(system_js.read_text(encoding="utf-8"), encoding="utf-8")
-        return "restored appIconIndicators.js from system copy; restart GNOME Shell."
-    return "local extension present but not patched by this tool"
+
+    _cleanup_unused_local_copy()
+    return (
+        "restored system Ubuntu Dock indicators (follow dock edge again).\n"
+        "restart GNOME Shell to take effect "
+        "(X11: Alt+F2 → r → Enter; Wayland: log out/in)."
+    )
+
+
+def status_text() -> str:
+    live = active_extension_path() or "(unknown)"
+    state = "active" if is_active() else "inactive"
+    local_note = ""
+    if LOCAL_EXT.is_dir():
+        local_note = (
+            f"\nnote: unused local copy exists at {LOCAL_EXT} "
+            "(Ubuntu is loading the system extension, not this folder)"
+        )
+    return f"{state}\nloaded path: {live}{local_note}"
 
 
 def main() -> None:
@@ -104,7 +176,7 @@ def main() -> None:
     args = parser.parse_args()
     try:
         if args.action == "status":
-            print("active" if is_active() else "inactive")
+            print(status_text())
         elif args.action == "apply":
             print(apply_patch())
         else:

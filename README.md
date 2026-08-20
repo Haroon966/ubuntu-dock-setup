@@ -169,8 +169,10 @@ By default Ubuntu Dock rotates the red/window indicators to the dock edge
 ./dock.sh indicators-status   # active | inactive
 ```
 
-Or use the checkbox in `./dock.sh config`. Restart GNOME Shell afterwards
-(X11: Alt+F2 → `r` → Enter; Wayland: log out/in).
+Or use the checkbox in `./dock.sh config`. This patches the **system** Ubuntu Dock
+file (needs `sudo`) because Ubuntu loads the dock from `/usr/share`, not
+`~/.local`. Restart GNOME Shell afterwards (X11: Alt+F2 → `r` → Enter; Wayland:
+log out/in).
 
 ## Requirements
 
