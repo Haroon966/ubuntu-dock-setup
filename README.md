@@ -17,8 +17,9 @@ curl -fsSL https://raw.githubusercontent.com/codebyshoaib/ubuntu-dock-setup/main
 
 That command now runs `setup` by default:
 
-- On an interactive desktop session, it opens the config UI first.
-- On headless/non-interactive sessions, it applies the default preset (`apply + verify`).
+- On a graphical desktop (`DISPLAY` / `WAYLAND_DISPLAY`), it opens the config UI first —
+  including the common `curl | bash` one-shot path (stdin is a pipe, not a TTY).
+- On headless / CI sessions, it applies the default preset (`apply + verify`).
 
 No clone, no sudo, nothing written outside dconf except a cached UI file when needed.
 Takes effect immediately — no logout or shell restart.

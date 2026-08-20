@@ -142,8 +142,12 @@ should_launch_ui() {
   if [[ "${DOCK_SETUP_FORCE_UI:-}" == "1" ]]; then
     return 0
   fi
-  # Only for interactive desktop sessions.
-  [[ -t 0 && -t 1 ]] || return 1
+  # Skip known CI / non-desktop automation environments.
+  if [[ "${CI:-}" == "true" || -n "${GITHUB_ACTIONS:-}" || -n "${GITLAB_CI:-}" ]]; then
+    return 1
+  fi
+  # One-shot is usually `curl | bash`, so stdin is a pipe (not a TTY).
+  # Decide from graphical session env instead of tty checks.
   [[ -n "${DISPLAY:-}" || -n "${WAYLAND_DISPLAY:-}" ]] || return 1
   return 0
 }
