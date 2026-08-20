@@ -5,6 +5,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 import sys
+import os
 
 SCHEMA = "org.gnome.shell.extensions.dash-to-dock"
 
@@ -387,6 +388,8 @@ def build_ui() -> None:
 
 
 def main() -> None:
+    if not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
+        die("no graphical session detected (DISPLAY/WAYLAND_DISPLAY missing)")
     ensure_deps()
     build_ui()
 
