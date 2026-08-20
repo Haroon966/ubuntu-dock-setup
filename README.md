@@ -1,19 +1,33 @@
 # ubuntu-dock-setup
 
-<p align="center">
-  <strong>Floating Ubuntu Dock — full screen for your windows</strong><br/>
-  One script. One GTK UI. No strut. No wasted pixels.
-</p>
+<br />
 
-<p align="center">
-  <img src="docs/hero.jpg" alt="Floating translucent Ubuntu Dock centered at the bottom of the desktop" width="920" />
-</p>
+<div align="center">
 
-<p align="center">
-  <a href="#one-shot-setup"><img src="https://img.shields.io/badge/install-curl%20%7C%20bash-2ea44f?style=flat-square" alt="Install with curl | bash" /></a>
-  <a href="#configure-from-ui"><img src="https://img.shields.io/badge/UI-GTK%20config-0A66C2?style=flat-square" alt="GTK config UI" /></a>
-  <a href="#running-indicator-position"><img src="https://img.shields.io/badge/indicators-always%20under%20icons-6e40c9?style=flat-square" alt="Indicators under icons" /></a>
-</p>
+### Floating Ubuntu Dock
+
+**Full screen for your windows — no strut, no wasted pixels.**
+
+<br />
+
+<img
+  src="docs/hero-crop.jpg"
+  alt="Centered floating translucent Ubuntu Dock with running indicators under the icons"
+  width="880"
+/>
+
+<br />
+
+`curl -fsSL …/dock.sh | bash` · GTK config UI · indicators stay under icons
+
+[Install](#one-shot-setup) ·
+[Configure UI](#configure-from-ui) ·
+[Screenshot](#screenshot) ·
+[Indicators](#running-indicator-position)
+
+</div>
+
+<br />
 
 ---
 
@@ -25,6 +39,20 @@ maximized window is permanently narrower. GNOME's Settings → Appearance panel 
 exposes three of the knobs involved (position: left/bottom/right, icon size, autohide).
 The rest live in the `dash-to-dock` GSettings schema. This script sets them all in one
 shot and verifies the result.
+
+## Screenshot
+
+Full desktop view of the floating dock (original capture — not modified):
+
+<p align="center">
+  <img
+    src="docs/hero.jpg"
+    alt="Full desktop screenshot: floating bottom dock on a dark Ubuntu desktop"
+    width="920"
+  />
+</p>
+
+<p align="center"><sub>Floating pill dock · translucent bar · running indicator under the active app</sub></p>
 
 ## One-shot setup
 
