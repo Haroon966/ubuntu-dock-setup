@@ -71,8 +71,10 @@ same() {
 
 # Read every key back and diff against what we asked for. Exits non-zero on
 # mismatch, so this doubles as the test.
+# Note: verify checks the *script defaults* (SETTINGS), not live UI tweaks.
 verify() {
   local fails=0 key want got
+  echo "verify: checking script defaults (not live UI state)"
   for pair in "${SETTINGS[@]}"; do
     key="${pair%%=*}"; want="${pair#*=}"
     got=$(gsettings get "$SCHEMA" "$key")
@@ -81,6 +83,14 @@ verify() {
       fails=$((fails + 1))
     fi
   done
+  # Sanity hint: floating dock without intellihide often looks "stuck".
+  local fixed intellihide
+  fixed=$(gsettings get "$SCHEMA" dock-fixed)
+  intellihide=$(gsettings get "$SCHEMA" intellihide)
+  if [[ "$fixed" == "false" && "$intellihide" != "true" ]]; then
+    echo "WARN floating dock without intellihide — dock may stay stuck visible/hidden" >&2
+    echo "hint: ./dock.sh apply, or toggle the extension after suspend/unlock (known dash-to-dock issue)" >&2
+  fi
   # dock-fixed=false must translate into zero reserved pixels at the bottom.
   if [[ "${XDG_SESSION_TYPE:-}" == x11 ]] && command -v xprop >/dev/null; then
     local geom_h work
@@ -90,6 +100,9 @@ verify() {
     [[ "$work" == "$geom_h" ]] \
       && echo "OK dock reserves no space (workarea reaches screen bottom)" \
       || { echo "MISMATCH dock still reserves space: workarea ${work}px of ${geom_h}px"; fails=$((fails + 1)); }
+  else
+    # Wayland (or no xprop): cannot prove strut via _NET_WORKAREA.
+    echo "OK Wayland/non-X11: strut pixel check skipped; dock-fixed=${fixed} (gsettings only)"
   fi
   [[ $fails -eq 0 ]] && echo "verify: ok" || { echo "verify: $fails problem(s)" >&2; exit 1; }
 }
@@ -122,6 +135,26 @@ config() {
         echo "error: dock-config.py not found and curl/wget unavailable to fetch it." >&2
         echo "hint: install curl or clone this repo; then run './dock.sh config'." >&2
         return 1
+      fi
+      if [[ -n "${DOCK_SETUP_EXPECT_SHA256:-}" ]]; then
+        local got_hash
+        if command -v sha256sum >/dev/null; then
+          got_hash=$(sha256sum "$script" | awk '{print $1}')
+        elif command -v shasum >/dev/null; then
+          got_hash=$(shasum -a 256 "$script" | awk '{print $1}')
+        else
+          echo "error: DOCK_SETUP_EXPECT_SHA256 set but sha256sum/shasum not found" >&2
+          rm -f "$script"
+          return 1
+        fi
+        if [[ "$got_hash" != "$DOCK_SETUP_EXPECT_SHA256" ]]; then
+          echo "error: dock-config.py checksum mismatch" >&2
+          echo "  want: $DOCK_SETUP_EXPECT_SHA256" >&2
+          echo "  got:  $got_hash" >&2
+          rm -f "$script"
+          return 1
+        fi
+        echo "OK dock-config.py sha256 matches DOCK_SETUP_EXPECT_SHA256"
       fi
       chmod +x "$script" || true
     fi

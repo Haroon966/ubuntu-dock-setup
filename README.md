@@ -24,6 +24,25 @@ That command now runs `setup` by default:
 No clone, no sudo, nothing written outside dconf except a cached UI file when needed.
 Takes effect immediately — no logout or shell restart.
 
+### Trust the download (recommended)
+
+Prefer reading the script before piping it into a shell. To verify checksums from a clone:
+
+```bash
+git clone https://github.com/codebyshoaib/ubuntu-dock-setup.git
+cd ubuntu-dock-setup
+sha256sum -c SHA256SUMS
+./dock.sh
+```
+
+Or download `dock.sh`, check it against [SHA256SUMS](SHA256SUMS), then run it locally.
+When the UI is fetched into the cache, pin its hash:
+
+```bash
+DOCK_SETUP_EXPECT_SHA256='<sha256-of-dock-config.py>' \
+  curl -fsSL https://raw.githubusercontent.com/codebyshoaib/ubuntu-dock-setup/main/dock.sh | bash -s -- config
+```
+
 Other modes, same way:
 
 ```bash
@@ -47,7 +66,8 @@ Idempotent — re-run it any time.
 ## Configure from UI
 
 After cloning the repo, open a GTK dialog to change icon size, position, stay/hide
-behavior, hover delays, and look — without editing the script:
+behavior, click action, workspace isolation, hover delays, and look — without editing
+the script:
 
 ```bash
 ./dock.sh config
@@ -66,7 +86,7 @@ The UI reads the live `dash-to-dock` settings, applies changes immediately via
 When running from one-shot (`curl | bash`), `dock.sh` auto-downloads `dock-config.py`
 to `${XDG_CACHE_HOME:-~/.cache}/ubuntu-dock-setup/` if the file is not present locally.
 
-Stay / hide presets in the UI:
+### Stay / hide presets
 
 | Preset | Effect |
 | --- | --- |
@@ -78,6 +98,22 @@ Stay / hide presets in the UI:
 Hover vs pressure: leave “Require pressure…” unchecked to reveal on simple edge hover
 (`require-pressure-to-show=false`). Timing sliders map to `show-delay`, `hide-delay`,
 and `animation-time`.
+
+### Named style packs
+
+The UI also offers named packs (they do **not** change what `./dock.sh apply` installs):
+
+| Pack | Intent |
+| --- | --- |
+| Mac floating | Bottom floating pill, dots indicator, focus-or-previews |
+| Windows taskbar-like | Edge-to-edge pinned bar, `minimize-or-previews`, multi-monitor |
+| Minimal dark | Smaller icons, lower opacity, hide Show Apps |
+
+### Export / import
+
+**Export preset** writes the current UI selection to
+`${XDG_CONFIG_HOME:-~/.config}/ubuntu-dock-setup/preset.json`.
+**Import preset** reloads that file. Useful for dotfiles or moving settings between machines.
 
 `./dock.sh verify` still checks the **script defaults**, not whatever you last chose in
 the UI. That is intentional — verify is for the one-shot preset, not a live UI state
@@ -98,6 +134,9 @@ DOCK_SETUP_FORCE_UI=1 curl -fsSL "$URL" | bash
 # Pin UI script source
 DOCK_SETUP_UI_URL="https://raw.githubusercontent.com/codebyshoaib/ubuntu-dock-setup/main/dock-config.py" \
 curl -fsSL "$URL" | bash
+
+# Require a known sha256 for the cached UI download
+DOCK_SETUP_EXPECT_SHA256='…' curl -fsSL "$URL" | bash -s -- config
 ```
 
 ## Requirements

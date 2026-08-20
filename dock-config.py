@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
-"""GTK UI to configure Ubuntu Dock size, hover, and stay behavior via gsettings."""
+"""GTK UI to configure Ubuntu Dock size, hover, stay, and behavior via gsettings."""
 from __future__ import annotations
 
+import json
+import os
 import shutil
 import subprocess
 import sys
-import os
+from pathlib import Path
 
 SCHEMA = "org.gnome.shell.extensions.dash-to-dock"
+PRESET_DIR = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "ubuntu-dock-setup"
+PRESET_FILE = PRESET_DIR / "preset.json"
 
 # Matches dock.sh SETTINGS for "Reset to script defaults".
 SCRIPT_DEFAULTS = {
@@ -37,7 +41,59 @@ SCRIPT_DEFAULTS = {
     "middle-click-action": "quit",
 }
 
+# Keys the UI can collect / export (stay presets + behavior + look).
+EXPORTABLE_KEYS = (
+    "dash-max-icon-size",
+    "icon-size-fixed",
+    "dock-position",
+    "dock-fixed",
+    "intellihide",
+    "intellihide-mode",
+    "autohide",
+    "extend-height",
+    "require-pressure-to-show",
+    "show-delay",
+    "hide-delay",
+    "animation-time",
+    "transparency-mode",
+    "custom-background-color",
+    "background-opacity",
+    "background-color",
+    "running-indicator-style",
+    "click-action",
+    "isolate-workspaces",
+    "isolate-monitors",
+    "multi-monitor",
+    "show-apps-at-top",
+    "show-show-apps-button",
+)
+
 POSITIONS = ("BOTTOM", "LEFT", "RIGHT", "TOP")
+
+CLICK_ACTIONS = (
+    ("focus-or-previews", "Focus or previews (default-ish)"),
+    ("minimize", "Minimize"),
+    ("minimize-or-previews", "Minimize or previews (Windows-like)"),
+    ("minimize-or-overview", "Minimize or overview"),
+    ("cycle-windows", "Cycle windows"),
+    ("previews", "Previews"),
+    ("focus-minimize-or-previews", "Focus, minimize, or previews"),
+    ("launch", "Launch"),
+    ("skip", "Skip"),
+    ("quit", "Quit"),
+)
+
+INDICATOR_STYLES = (
+    "DEFAULT",
+    "DOTS",
+    "SQUARES",
+    "DASHES",
+    "SEGMENTED",
+    "SOLID",
+    "CILIORA",
+    "METRO",
+    "BINARY",
+)
 
 STAY_PRESETS = (
     (
@@ -84,6 +140,71 @@ STAY_PRESETS = (
     ),
 )
 
+# Named style packs layered on top of SCRIPT_DEFAULTS (does not change one-shot apply).
+NAMED_PRESETS = (
+    (
+        "mac",
+        "Mac floating",
+        {
+            **SCRIPT_DEFAULTS,
+            "dock-position": "BOTTOM",
+            "extend-height": "false",
+            "dock-fixed": "false",
+            "intellihide": "true",
+            "intellihide-mode": "ALL_WINDOWS",
+            "autohide": "true",
+            "background-opacity": "0.40",
+            "background-color": "#1e1e2e",
+            "running-indicator-style": "DOTS",
+            "click-action": "focus-or-previews",
+            "show-apps-at-top": "false",
+            "show-show-apps-button": "true",
+            "isolate-workspaces": "false",
+            "isolate-monitors": "false",
+            "multi-monitor": "false",
+        },
+    ),
+    (
+        "windows",
+        "Windows taskbar-like",
+        {
+            **SCRIPT_DEFAULTS,
+            "dock-position": "BOTTOM",
+            "extend-height": "true",
+            "dock-fixed": "true",
+            "intellihide": "false",
+            "autohide": "false",
+            "always-center-icons": "false",
+            "background-opacity": "0.85",
+            "background-color": "#202020",
+            "running-indicator-style": "METRO",
+            "click-action": "minimize-or-previews",
+            "show-apps-at-top": "true",
+            "show-show-apps-button": "true",
+            "isolate-workspaces": "true",
+            "isolate-monitors": "false",
+            "multi-monitor": "true",
+        },
+    ),
+    (
+        "minimal",
+        "Minimal dark",
+        {
+            **SCRIPT_DEFAULTS,
+            "dash-max-icon-size": "28",
+            "background-opacity": "0.25",
+            "background-color": "#11111b",
+            "running-indicator-style": "BINARY",
+            "click-action": "cycle-windows",
+            "show-show-apps-button": "false",
+            "show-apps-at-top": "false",
+            "isolate-workspaces": "true",
+            "isolate-monitors": "false",
+            "multi-monitor": "false",
+        },
+    ),
+)
+
 
 def die(msg: str, code: int = 1) -> None:
     print(f"error: {msg}", file=sys.stderr)
@@ -116,6 +237,26 @@ def schema_ok() -> bool:
     return SCHEMA in out.splitlines()
 
 
+_SCHEMA_KEYS: set[str] | None = None
+
+
+def schema_keys() -> set[str]:
+    global _SCHEMA_KEYS
+    if _SCHEMA_KEYS is None:
+        out = subprocess.run(
+            ["gsettings", "list-keys", SCHEMA],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+        _SCHEMA_KEYS = set(out.splitlines())
+    return _SCHEMA_KEYS
+
+
+def schema_has_key(key: str) -> bool:
+    return key in schema_keys()
+
+
 def gget(key: str) -> str:
     raw = subprocess.run(
         ["gsettings", "get", SCHEMA, key],
@@ -136,6 +277,8 @@ def gset(key: str, value: str) -> None:
 
 def apply_map(settings: dict[str, str]) -> None:
     for key, value in settings.items():
+        if not schema_has_key(key):
+            continue
         gset(key, value)
 
 
@@ -162,12 +305,17 @@ def build_ui() -> None:
         die(f"{SCHEMA} not found — is the Ubuntu Dock extension installed?")
 
     win = Gtk.Window(title="Ubuntu Dock Config")
-    win.set_border_width(16)
-    win.set_default_size(480, 520)
+    win.set_border_width(12)
+    win.set_default_size(520, 640)
     win.connect("destroy", Gtk.main_quit)
 
+    scroll = Gtk.ScrolledWindow()
+    scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+    win.add(scroll)
+
     outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
-    win.add(outer)
+    outer.set_border_width(8)
+    scroll.add(outer)
 
     def section(title: str) -> Gtk.Box:
         frame = Gtk.Frame(label=title)
@@ -180,10 +328,25 @@ def build_ui() -> None:
     def row(parent: Gtk.Box, label: str, widget: Gtk.Widget) -> None:
         h = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
         lab = Gtk.Label(label=label, xalign=0)
-        lab.set_size_request(160, -1)
+        lab.set_size_request(170, -1)
         h.pack_start(lab, False, False, 0)
         h.pack_start(widget, True, True, 0)
         parent.pack_start(h, False, False, 0)
+
+    # --- Named presets ---
+    preset_box = section("Named presets")
+    preset_combo = Gtk.ComboBoxText()
+    preset_combo.append("", "(choose a named preset…)")
+    for pid, label, _keys in NAMED_PRESETS:
+        preset_combo.append(pid, label)
+    preset_combo.set_active_id("")
+    row(preset_box, "Style pack", preset_combo)
+    preset_hint = Gtk.Label(
+        label="Applies a full look+behavior pack. Script one-shot defaults stay unchanged.",
+        xalign=0,
+    )
+    preset_hint.set_line_wrap(True)
+    preset_box.pack_start(preset_hint, False, False, 0)
 
     # --- Size ---
     size_box = section("Size")
@@ -238,6 +401,41 @@ def build_ui() -> None:
     pressure = Gtk.CheckButton(label="Require pressure at edge to show (instead of simple hover)")
     pressure.set_active(gget("require-pressure-to-show") == "true")
     stay_box.pack_start(pressure, False, False, 0)
+
+    # --- Behavior ---
+    behavior_box = section("Behavior")
+    click_combo = Gtk.ComboBoxText()
+    for cid, clabel in CLICK_ACTIONS:
+        click_combo.append(cid, clabel)
+    cur_click = gget("click-action") if schema_has_key("click-action") else "focus-or-previews"
+    if cur_click in dict(CLICK_ACTIONS):
+        click_combo.set_active_id(cur_click)
+    else:
+        click_combo.append(cur_click, cur_click)
+        click_combo.set_active_id(cur_click)
+    row(behavior_box, "Click action", click_combo)
+
+    isolate_ws = Gtk.CheckButton(label="Isolate workspaces (only show apps on current workspace)")
+    isolate_ws.set_active(schema_has_key("isolate-workspaces") and gget("isolate-workspaces") == "true")
+    behavior_box.pack_start(isolate_ws, False, False, 0)
+
+    isolate_mon = Gtk.CheckButton(label="Isolate monitors (only show apps on current monitor)")
+    isolate_mon.set_active(schema_has_key("isolate-monitors") and gget("isolate-monitors") == "true")
+    behavior_box.pack_start(isolate_mon, False, False, 0)
+
+    multi_mon = Gtk.CheckButton(label="Show dock on all monitors")
+    multi_mon.set_active(schema_has_key("multi-monitor") and gget("multi-monitor") == "true")
+    behavior_box.pack_start(multi_mon, False, False, 0)
+
+    apps_top = Gtk.CheckButton(label="Show Apps button at start of dock")
+    apps_top.set_active(schema_has_key("show-apps-at-top") and gget("show-apps-at-top") == "true")
+    behavior_box.pack_start(apps_top, False, False, 0)
+
+    show_apps = Gtk.CheckButton(label="Show the Show Apps button")
+    show_apps.set_active(
+        (not schema_has_key("show-show-apps-button")) or gget("show-show-apps-button") == "true"
+    )
+    behavior_box.pack_start(show_apps, False, False, 0)
 
     # --- Timing ---
     time_box = section("Hover / animation timing")
@@ -294,7 +492,19 @@ def build_ui() -> None:
     color_row.pack_start(color_btn, False, False, 0)
     row(look_box, "Background color", color_row)
 
+    indicator_combo = Gtk.ComboBoxText()
+    for style in INDICATOR_STYLES:
+        indicator_combo.append(style, style.capitalize() if style != "DEFAULT" else "Default")
+    cur_ind = gget("running-indicator-style") if schema_has_key("running-indicator-style") else "BINARY"
+    if cur_ind in INDICATOR_STYLES:
+        indicator_combo.set_active_id(cur_ind)
+    else:
+        indicator_combo.append(cur_ind, cur_ind)
+        indicator_combo.set_active_id(cur_ind)
+    row(look_box, "Running indicator", indicator_combo)
+
     status = Gtk.Label(label="", xalign=0)
+    status.set_line_wrap(True)
     outer.pack_start(status, False, False, 0)
 
     def selected_stay() -> tuple[str, dict[str, str]]:
@@ -303,28 +513,35 @@ def build_ui() -> None:
                 return pid, keys
         return STAY_PRESETS[0][0], STAY_PRESETS[0][2]
 
-    def collect_and_apply(extra: dict[str, str] | None = None) -> None:
+    def collect_settings() -> dict[str, str]:
         settings: dict[str, str] = {}
-        if extra:
-            settings.update(extra)
-        else:
-            settings["dash-max-icon-size"] = str(int(icon_scale.get_value()))
-            settings["icon-size-fixed"] = "true"
-            pos_id = pos_combo.get_active_id() or "BOTTOM"
-            settings["dock-position"] = pos_id
-            _pid, stay_keys = selected_stay()
-            settings.update(stay_keys)
-            settings["require-pressure-to-show"] = "true" if pressure.get_active() else "false"
-            settings["show-delay"] = f"{show_delay.get_value():.2f}"
-            settings["hide-delay"] = f"{hide_delay.get_value():.2f}"
-            settings["animation-time"] = f"{anim_time.get_value():.2f}"
-            settings["transparency-mode"] = "FIXED"
-            settings["custom-background-color"] = "true"
-            settings["background-opacity"] = f"{opacity.get_value():.2f}"
-            color = color_entry.get_text().strip()
-            if color and not color.startswith("#"):
-                color = f"#{color}"
-            settings["background-color"] = color or "#181825"
+        settings["dash-max-icon-size"] = str(int(icon_scale.get_value()))
+        settings["icon-size-fixed"] = "true"
+        settings["dock-position"] = pos_combo.get_active_id() or "BOTTOM"
+        _pid, stay_keys = selected_stay()
+        settings.update(stay_keys)
+        settings["require-pressure-to-show"] = "true" if pressure.get_active() else "false"
+        settings["show-delay"] = f"{show_delay.get_value():.2f}"
+        settings["hide-delay"] = f"{hide_delay.get_value():.2f}"
+        settings["animation-time"] = f"{anim_time.get_value():.2f}"
+        settings["transparency-mode"] = "FIXED"
+        settings["custom-background-color"] = "true"
+        settings["background-opacity"] = f"{opacity.get_value():.2f}"
+        color = color_entry.get_text().strip()
+        if color and not color.startswith("#"):
+            color = f"#{color}"
+        settings["background-color"] = color or "#181825"
+        settings["running-indicator-style"] = indicator_combo.get_active_id() or "BINARY"
+        settings["click-action"] = click_combo.get_active_id() or "focus-or-previews"
+        settings["isolate-workspaces"] = "true" if isolate_ws.get_active() else "false"
+        settings["isolate-monitors"] = "true" if isolate_mon.get_active() else "false"
+        settings["multi-monitor"] = "true" if multi_mon.get_active() else "false"
+        settings["show-apps-at-top"] = "true" if apps_top.get_active() else "false"
+        settings["show-show-apps-button"] = "true" if show_apps.get_active() else "false"
+        return settings
+
+    def collect_and_apply(extra: dict[str, str] | None = None) -> None:
+        settings = extra if extra is not None else collect_settings()
         apply_map(settings)
         status.set_text(f"Applied {len(settings)} settings.")
 
@@ -348,6 +565,28 @@ def build_ui() -> None:
         rgba = Gdk.RGBA()
         if rgba.parse(bg_now):
             color_btn.set_rgba(rgba)
+        if schema_has_key("running-indicator-style"):
+            ind = gget("running-indicator-style")
+            if indicator_combo.get_active_id() != ind:
+                if ind not in INDICATOR_STYLES:
+                    indicator_combo.append(ind, ind)
+                indicator_combo.set_active_id(ind)
+        if schema_has_key("click-action"):
+            click = gget("click-action")
+            if click_combo.get_active_id() != click:
+                if click not in dict(CLICK_ACTIONS):
+                    click_combo.append(click, click)
+                click_combo.set_active_id(click)
+        if schema_has_key("isolate-workspaces"):
+            isolate_ws.set_active(gget("isolate-workspaces") == "true")
+        if schema_has_key("isolate-monitors"):
+            isolate_mon.set_active(gget("isolate-monitors") == "true")
+        if schema_has_key("multi-monitor"):
+            multi_mon.set_active(gget("multi-monitor") == "true")
+        if schema_has_key("show-apps-at-top"):
+            apps_top.set_active(gget("show-apps-at-top") == "true")
+        if schema_has_key("show-show-apps-button"):
+            show_apps.set_active(gget("show-show-apps-button") == "true")
         status.set_text("Reloaded from current dock settings.")
 
     def on_apply(_b: Gtk.Button) -> None:
@@ -360,27 +599,80 @@ def build_ui() -> None:
         try:
             apply_map(SCRIPT_DEFAULTS)
             load_from_gsettings()
+            preset_combo.set_active_id("")
             status.set_text("Restored script defaults (same as ./dock.sh apply).")
         except subprocess.CalledProcessError as exc:
             status.set_text(f"Failed: {exc}")
 
     def on_reload(_b: Gtk.Button) -> None:
         load_from_gsettings()
+        preset_combo.set_active_id("")
+
+    def on_named_preset(_c: Gtk.ComboBoxText) -> None:
+        pid = preset_combo.get_active_id() or ""
+        if not pid:
+            return
+        for nid, _label, keys in NAMED_PRESETS:
+            if nid == pid:
+                try:
+                    apply_map(keys)
+                    load_from_gsettings()
+                    status.set_text(f"Applied named preset: {_label}")
+                except subprocess.CalledProcessError as exc:
+                    status.set_text(f"Failed: {exc}")
+                return
+
+    preset_combo.connect("changed", on_named_preset)
+
+    def on_export(_b: Gtk.Button) -> None:
+        try:
+            settings = collect_settings()
+            PRESET_DIR.mkdir(parents=True, exist_ok=True)
+            payload = {"schema": SCHEMA, "settings": settings}
+            PRESET_FILE.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+            status.set_text(f"Exported to {PRESET_FILE}")
+        except OSError as exc:
+            status.set_text(f"Export failed: {exc}")
+
+    def on_import(_b: Gtk.Button) -> None:
+        if not PRESET_FILE.is_file():
+            status.set_text(f"No preset file at {PRESET_FILE} — export first.")
+            return
+        try:
+            data = json.loads(PRESET_FILE.read_text(encoding="utf-8"))
+            settings = data.get("settings") if isinstance(data, dict) else None
+            if not isinstance(settings, dict):
+                status.set_text("Invalid preset file: missing settings object.")
+                return
+            cleaned = {str(k): str(v) for k, v in settings.items() if str(k) in EXPORTABLE_KEYS}
+            apply_map(cleaned)
+            load_from_gsettings()
+            preset_combo.set_active_id("")
+            status.set_text(f"Imported {len(cleaned)} keys from {PRESET_FILE}")
+        except (OSError, json.JSONDecodeError, subprocess.CalledProcessError) as exc:
+            status.set_text(f"Import failed: {exc}")
 
     buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+    buttons.set_homogeneous(False)
     apply_btn = Gtk.Button(label="Apply")
     apply_btn.get_style_context().add_class("suggested-action")
     defaults_btn = Gtk.Button(label="Reset to script defaults")
     reload_btn = Gtk.Button(label="Reload")
+    export_btn = Gtk.Button(label="Export preset")
+    import_btn = Gtk.Button(label="Import preset")
     close_btn = Gtk.Button(label="Close")
     apply_btn.connect("clicked", on_apply)
     defaults_btn.connect("clicked", on_defaults)
     reload_btn.connect("clicked", on_reload)
+    export_btn.connect("clicked", on_export)
+    import_btn.connect("clicked", on_import)
     close_btn.connect("clicked", lambda _b: win.destroy())
-    buttons.pack_end(close_btn, False, False, 0)
-    buttons.pack_end(apply_btn, False, False, 0)
     buttons.pack_start(defaults_btn, False, False, 0)
     buttons.pack_start(reload_btn, False, False, 0)
+    buttons.pack_start(export_btn, False, False, 0)
+    buttons.pack_start(import_btn, False, False, 0)
+    buttons.pack_end(close_btn, False, False, 0)
+    buttons.pack_end(apply_btn, False, False, 0)
     outer.pack_start(buttons, False, False, 0)
 
     win.show_all()
